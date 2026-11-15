@@ -2,6 +2,14 @@
 
 A simple daily planner: one row per hour, with tasks that can span several hours, tags, recurring commitments and suggestions. You choose the start and end of each day.
 
+## Download
+
+**[Apple Silicon (M1, M2, M3, M4)](https://github.com/simone-nicholas/Scheduler/releases/latest/download/Scheduler-1.0.0-arm64.dmg)**
+
+Open the `.dmg` and drag Scheduler into Applications. On first launch, right-click the app and choose _Open_.
+
+Intel Macs are not supported yet.
+
 ## Features
 
 - **Hour-by-hour plan.** Each day has its own start and end hour.
@@ -19,7 +27,7 @@ Open `index.html` in any modern browser.
 
 ## Run as a macOS app
 
-Requires [Node.js](https://nodejs.org) (LTS).
+Requires [Node.js](https://nodejs.org/) (LTS).
 
 ```bash
 npm install
@@ -27,7 +35,7 @@ npm run start   # open the app for testing
 npm run dist    # build a .dmg in the dist folder
 ```
 
-The app is built with [Electron](https://www.electronjs.org/) and is not signed. On first launch, right-click the app and choose *Open*.
+The app is built with [Electron](https://www.electronjs.org/) and is not signed. On first launch, right-click the app and choose _Open_.
 
 ## Project structure
 
