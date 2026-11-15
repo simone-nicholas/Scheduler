@@ -1,0 +1,1078 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Scheduler</title>
+<style>
+/* Layout: one column of hour rows, with commitments beside it on wide screens. */
+:root {
+  --bg: #f6f5f1;
+  --surface: #ffffff;
+  --fg: #1d1d1b;
+  --muted: #76746c;
+  --line: #e3e1d9;
+  --accent: #2f5d50;
+  --accent-soft: #dfeae6;
+  --now: #fbf3d9;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161715;
+    --surface: #1f201d;
+    --fg: #ecebe5;
+    --muted: #9a988f;
+    --line: #34362f;
+    --accent: #8cc7b5;
+    --accent-soft: #263a33;
+    --now: #3a3420;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161715;
+  --surface: #1f201d;
+  --fg: #ecebe5;
+  --muted: #9a988f;
+  --line: #34362f;
+  --accent: #8cc7b5;
+  --accent-soft: #263a33;
+  --now: #3a3420;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 32px;
+}
+main { max-width: 980px; margin: 0 auto; }
+
+header {
+  display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between;
+  gap: 12px 20px; margin-bottom: 18px;
+}
+h1 { font-size: 22px; margin: 0; text-wrap: balance; }
+
+.daynav { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.daynav .date { font-size: 14px; color: var(--muted); min-width: 0; margin: 0 4px; }
+.daynav .date.today { color: var(--fg); font-weight: 600; }
+.navbtn {
+  font: inherit; font-size: 14px; color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 4px 10px; min-width: 34px; cursor: pointer;
+}
+.navbtn:disabled { opacity: .4; cursor: default; }
+.navbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.rangenav { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.rangenav select {
+  font: inherit; font-size: 13px; color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 4px 6px;
+}
+.rangenav select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.headright { display: flex; align-items: end; gap: 16px; }
+.progress { text-align: right; font-variant-numeric: tabular-nums; }
+.progress strong { font-size: 20px; color: var(--accent); }
+.progress span { color: var(--muted); font-size: 13px; display: block; }
+.gear { font-size: 18px; padding: 4px 12px; }
+
+.settings {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px;
+  padding: 14px 16px; margin-bottom: 18px;
+}
+.settings[hidden] { display: none; }
+.settings .sethead { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.setrow { display: flex; align-items: center; gap: 10px; }
+.setrow label { color: var(--muted); font-size: 13px; }
+.setrow select {
+  font: inherit; font-size: 14px; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 8px;
+}
+.setrow select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; }
+@media (max-width: 760px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-width: 0;
+}
+.hours { padding: 4px 0; }
+.row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) 72px 30px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--line);
+}
+.row:first-child { border-top: 0; }
+.row.now { background: var(--now); }
+.hour { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.row.now .hour { color: var(--fg); font-weight: 600; }
+.task {
+  width: 100%; min-width: 0;
+  font: inherit; color: var(--fg);
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  padding: 8px 10px;
+}
+.task::placeholder { color: var(--muted); opacity: .7; }
+.task:hover { border-color: var(--line); }
+.task:focus { outline: 2px solid var(--accent); outline-offset: 0; background: var(--bg); }
+.task.done { text-decoration: line-through; color: var(--muted); }
+.check {
+  width: 22px; height: 22px; margin: 0 auto;
+  accent-color: var(--accent); cursor: pointer;
+}
+.check:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.check:disabled { opacity: .5; cursor: default; }
+
+.spansel {
+  font: inherit; font-size: 13px; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 4px 6px; width: 100%; min-width: 0;
+}
+.spansel:disabled { opacity: .4; }
+.spansel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Tags appear only while their task row is selected (has focus). */
+.tags { grid-column: 2 / 5; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0 10px 6px; }
+.tags[hidden] { display: none; }
+.row:not(:focus-within) > .tags { display: none; }
+.tag {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 12px; color: var(--fg);
+  background: var(--accent-soft); border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+}
+.tag button, .sugx {
+  font: inherit; font-size: 14px; line-height: 1; color: var(--muted);
+  background: none; border: 0; cursor: pointer; padding: 2px 5px; border-radius: 999px;
+}
+.tag button:hover, .sugx:hover { color: var(--fg); }
+.tag button:focus-visible, .sugx:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tagsug {
+  font: inherit; font-size: 12px; color: var(--muted);
+  background: transparent; border: 1px dashed var(--line); border-radius: 999px;
+  padding: 2px 10px; cursor: pointer;
+}
+.tagsug:hover { color: var(--fg); border-color: var(--muted); }
+.tagsug:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tagin {
+  font: inherit; font-size: 12px; color: var(--fg);
+  background: transparent; border: 1px solid var(--line); border-radius: 999px;
+  padding: 3px 10px; width: 120px; min-width: 0;
+}
+.tagin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.row.cont .cont-text {
+  grid-column: 2 / 4; padding: 8px 10px;
+  color: var(--muted); font-style: italic; font-size: 14px; min-width: 0; overflow-wrap: anywhere;
+}
+
+aside.card { padding: 14px; }
+aside h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
+aside h2:not(:first-child) { margin-top: 20px; }
+aside p { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+.sugs { display: flex; flex-wrap: wrap; gap: 8px; }
+.sugchip {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 13px; color: var(--fg);
+  background: var(--accent-soft); border-radius: 999px;
+  padding: 2px 4px 2px 2px;
+}
+.sugchip .sugpick {
+  font: inherit; font-size: 13px; color: var(--fg);
+  background: none; border: 0; border-radius: 999px; padding: 4px 8px; cursor: pointer;
+}
+.sugchip .sugpick:hover { background: var(--bg); }
+.sugchip .sugpick:focus-visible, .sugx:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.recform, .inlineform { display: grid; gap: 8px; }
+.recform { grid-template-columns: 84px minmax(0, 1fr); }
+.inlineform { grid-template-columns: minmax(0, 1fr) auto; margin-top: 10px; }
+.recform select, .recform input, .inlineform input {
+  font: inherit; font-size: 14px; color: var(--fg);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 8px; min-width: 0;
+}
+.recform button { grid-column: 1 / -1; }
+.reclist { list-style: none; padding: 0; margin: 10px 0 0; }
+.reclist li {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px;
+}
+.reclist li:first-child { border-top: 0; }
+.reclist .when { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+.reclist .name { min-width: 0; overflow-wrap: anywhere; }
+.reclist .rm {
+  font: inherit; font-size: 12px; color: var(--muted);
+  background: none; border: 0; cursor: pointer; padding: 4px 6px; border-radius: 6px; flex: none;
+}
+.reclist .rm:hover { color: var(--fg); }
+.reclist .rm:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.note { color: var(--muted); font-size: 13px; }
+.btn {
+  font: inherit; font-size: 14px; color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 14px; cursor: pointer;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.btn.warn { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .row { transition: background-color .2s ease; }
+}
+</style>
+
+<main>
+  <header>
+    <div>
+      <h1 data-i18n="appTitle">Scheduler</h1>
+      <div class="daynav">
+        <button class="navbtn" id="prev" type="button" data-i18n-aria="prevDay">‹</button>
+        <span class="date" id="date"></span>
+        <button class="navbtn" id="next" type="button" data-i18n-aria="nextDay">›</button>
+        <button class="navbtn" id="todayBtn" type="button" data-i18n="today">Today</button>
+      </div>
+      <div class="rangenav">
+        <span data-i18n="dayFrom">Day from</span>
+        <select id="startSel" data-i18n-aria="dayStart"></select>
+        <span data-i18n="to">to</span>
+        <select id="endSel" data-i18n-aria="dayEnd"></select>
+      </div>
+    </div>
+    <div class="headright">
+      <div class="progress" aria-live="polite">
+        <strong id="count">0 / 0</strong>
+        <span data-i18n="tasksDone">tasks completed</span>
+      </div>
+      <button class="navbtn gear" id="gearBtn" type="button" aria-expanded="false" data-i18n-aria="settings">⚙</button>
+    </div>
+  </header>
+
+  <section class="card settings" id="settingsPanel" hidden>
+    <span class="sethead" data-i18n="settings">Settings</span>
+    <div class="setrow">
+      <label for="langSel" data-i18n="language">Language</label>
+      <select id="langSel">
+        <option value="en">English</option>
+        <option value="it">Italiano</option>
+      </select>
+    </div>
+    <div class="setrow">
+      <label for="themeSel" data-i18n="theme">Theme</label>
+      <select id="themeSel">
+        <option value="system" data-i18n="system">System</option>
+        <option value="light" data-i18n="light">Light</option>
+        <option value="dark" data-i18n="dark">Dark</option>
+      </select>
+    </div>
+  </section>
+
+  <div class="layout">
+    <section class="card hours" data-i18n-aria="hoursLabel">
+      <div id="rows"></div>
+    </section>
+
+    <aside class="card" data-i18n-aria="commitmentsLabel">
+      <h2 data-i18n="recTitle">Recurring commitments</h2>
+      <p data-i18n="recDesc">Every new day, these hours are filled in automatically when the page opens.</p>
+      <form class="recform" id="recForm">
+        <select id="recHour" data-i18n-aria="hourAria"></select>
+        <input type="text" id="recText" data-i18n-ph="recPh" data-i18n-aria="recAria" maxlength="80">
+        <button class="btn primary" type="submit" data-i18n="add">Add</button>
+      </form>
+      <ul class="reclist" id="recList"></ul>
+
+      <h2 data-i18n="sugTitle">Suggestions</h2>
+      <p data-i18n="sugDesc">Tap one to add it as a task in the first free hour. The same list appears as tags under a selected task.</p>
+      <div class="sugs" id="sugList"></div>
+      <form class="inlineform" id="sugForm">
+        <input type="text" id="sugText" data-i18n-ph="sugPh" data-i18n-aria="sugPh" maxlength="30">
+        <button class="btn" type="submit" data-i18n="add">Add</button>
+      </form>
+    </aside>
+  </div>
+
+  <div class="footer">
+    <div class="note" id="status"></div>
+    <button class="btn" id="reset" type="button">Clear day</button>
+  </div>
+</main>
+
+<datalist id="tagList"></datalist>
+
+<script>
+(function () {
+  var DEFAULT_START = 7, DEFAULT_END = 23;
+  var REC_KEY = "piano-ricorrenti";
+  var SUG_KEY = "piano-suggestions";
+  var OLD_TAG_KEY = "piano-tag-suggestions";
+  var SET_KEY = "piano-settings";
+  var DAY_PREFIX = "piano-giorno-";
+  var SUG_DEFAULTS = ["Chess", "F1", "Memory training", "Programming", "Art: Italian Gothic", "Integrals", "Spring Boot", "Study", "Memory", "Coding", "Art", "Exam"];
+
+  var I18N = {
+    en: {
+      appTitle: "Scheduler", prevDay: "Previous day", nextDay: "Next day", today: "Today", todayTag: " · today",
+      dayFrom: "Day from", to: "to", dayStart: "Day start", dayEnd: "Day end", tasksDone: "tasks completed",
+      hoursLabel: "Hours of the day", commitmentsLabel: "Commitments and suggestions",
+      recTitle: "Recurring commitments", recDesc: "Every new day, these hours are filled in automatically when the page opens.",
+      recPh: "e.g. Chess", recAria: "Recurring commitment", hourAria: "Hour", add: "Add", remove: "Remove",
+      removeRec: "Remove {name} at {hour}", noRec: "No recurring commitments yet.",
+      sugTitle: "Suggestions", sugDesc: "Tap one to add it as a task in the first free hour. The same list appears as tags under a selected task.",
+      sugPh: "New suggestion", sugAdd: "Add {name} as a task", sugRemove: "Remove suggestion {name}", noSug: "No suggestions.",
+      saved: "Changes are saved automatically on this device.",
+      saveErr: "Saving isn't available: data stays in this tab only.",
+      saveErrRec: "Saving isn't available: recurring commitments stay in this tab only.",
+      saveErrSug: "Saving isn't available: suggestions stay in this tab only.",
+      newDay: "New day: recurring commitments added.", allFull: "All hours are full: free a row to add {name}.",
+      clearDay: "Clear day", confirmClear: "Confirm: clear everything",
+      taskPh: "No task", taskAria: "Task at {hour}", durAria: "Duration at {hour}", oneHour: "1 hour", nHours: "{n} hours",
+      doneAt: "Done at {hour}", blockAt: "Block started at {hour}", contText: "↳ {text} · from {hour}",
+      removeTag: "Remove tag {name}", tagPh: "+ new tag", addTagAria: "Add a tag at {hour}", addTag: "Add tag {name}",
+      settings: "Settings", language: "Language", theme: "Theme", system: "System", light: "Light", dark: "Dark"
+    },
+    it: {
+      appTitle: "Scheduler", prevDay: "Giorno precedente", nextDay: "Giorno successivo", today: "Oggi", todayTag: " · oggi",
+      dayFrom: "Dalle", to: "alle", dayStart: "Inizio giornata", dayEnd: "Fine giornata", tasksDone: "attività completate",
+      hoursLabel: "Ore della giornata", commitmentsLabel: "Impegni e suggerimenti",
+      recTitle: "Impegni ricorrenti", recDesc: "Ogni nuovo giorno, all'apertura della pagina, queste ore vengono riempite automaticamente.",
+      recPh: "es. Scacchi", recAria: "Impegno ricorrente", hourAria: "Ora", add: "Aggiungi", remove: "Rimuovi",
+      removeRec: "Rimuovi {name} alle {hour}", noRec: "Nessun impegno ricorrente.",
+      sugTitle: "Suggerimenti", sugDesc: "Toccane uno per aggiungerlo come attività nella prima ora libera. La stessa lista compare come tag sotto un'attività selezionata.",
+      sugPh: "Nuovo suggerimento", sugAdd: "Aggiungi {name} come attività", sugRemove: "Rimuovi suggerimento {name}", noSug: "Nessun suggerimento.",
+      saved: "Le modifiche si salvano automaticamente su questo dispositivo.",
+      saveErr: "Salvataggio non disponibile: i dati restano solo in questa scheda.",
+      saveErrRec: "Salvataggio non disponibile: gli impegni ricorrenti restano solo in questa scheda.",
+      saveErrSug: "Salvataggio non disponibile: i suggerimenti restano solo in questa scheda.",
+      newDay: "Nuova giornata: impegni ricorrenti inseriti.", allFull: "Tutte le ore sono piene: libera una riga per aggiungere {name}.",
+      clearDay: "Svuota giornata", confirmClear: "Conferma: svuota tutto",
+      taskPh: "Nessuna attività", taskAria: "Attività alle {hour}", durAria: "Durata alle {hour}", oneHour: "1 ora", nHours: "{n} ore",
+      doneAt: "Completata alle {hour}", blockAt: "Blocco iniziato alle {hour}", contText: "↳ {text} · dalle {hour}",
+      removeTag: "Rimuovi tag {name}", tagPh: "+ nuovo tag", addTagAria: "Aggiungi un tag alle {hour}", addTag: "Aggiungi tag {name}",
+      settings: "Impostazioni", language: "Lingua", theme: "Tema", system: "Sistema", light: "Chiaro", dark: "Scuro"
+    }
+  };
+
+  function t(key, vars) {
+    var dict = I18N[settings.lang] || I18N.en;
+    var s = dict[key] !== undefined ? dict[key] : (I18N.en[key] !== undefined ? I18N.en[key] : key);
+    if (vars) Object.keys(vars).forEach(function (k) { s = s.split("{" + k + "}").join(vars[k]); });
+    return s;
+  }
+
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function startOf(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  function keyOf(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function dayKey(d) { return DAY_PREFIX + keyOf(d); }
+  function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+  function sameDay(a, b) { return keyOf(a) === keyOf(b); }
+  function hasText(s) { return !!(s && s.t && s.t.trim()); }
+  function hasTag(list, v) {
+    var low = v.toLowerCase();
+    return list.some(function (x) { return x.toLowerCase() === low; });
+  }
+
+  var TODAY = startOf(new Date());
+  var viewDay = TODAY;
+
+  var rowsEl = document.getElementById("rows");
+  var countEl = document.getElementById("count");
+  var statusEl = document.getElementById("status");
+  var resetBtn = document.getElementById("reset");
+  var dateEl = document.getElementById("date");
+  var prevBtn = document.getElementById("prev");
+  var nextBtn = document.getElementById("next");
+  var todayBtn = document.getElementById("todayBtn");
+  var startSel = document.getElementById("startSel");
+  var endSel = document.getElementById("endSel");
+  var gearBtn = document.getElementById("gearBtn");
+  var settingsPanel = document.getElementById("settingsPanel");
+  var langSel = document.getElementById("langSel");
+  var themeSel = document.getElementById("themeSel");
+  var recForm = document.getElementById("recForm");
+  var recHour = document.getElementById("recHour");
+  var recText = document.getElementById("recText");
+  var recList = document.getElementById("recList");
+  var tagList = document.getElementById("tagList");
+  var sugList = document.getElementById("sugList");
+  var sugForm = document.getElementById("sugForm");
+  var sugText = document.getElementById("sugText");
+
+  var resetArmed = false, resetTimer = null;
+  var rowEls = {};
+
+  // Settings: language and theme, stored on this device.
+  function loadSettings() {
+    var s = { lang: (navigator.language || "en").indexOf("it") === 0 ? "it" : "en", theme: "system" };
+    try {
+      var raw = window.localStorage.getItem(SET_KEY);
+      if (raw) {
+        var o = JSON.parse(raw);
+        if (o.lang === "en" || o.lang === "it") s.lang = o.lang;
+        if (o.theme === "system" || o.theme === "light" || o.theme === "dark") s.theme = o.theme;
+      }
+    } catch (e) { /* storage unavailable */ }
+    return s;
+  }
+
+  function saveSettings() {
+    try { window.localStorage.setItem(SET_KEY, JSON.stringify(settings)); } catch (e) { /* storage unavailable */ }
+  }
+
+  var settings = loadSettings();
+
+  function applyTheme() {
+    if (settings.theme === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", settings.theme);
+  }
+
+  function applyStaticStrings() {
+    document.documentElement.lang = settings.lang;
+    document.title = t("appTitle");
+    document.querySelectorAll("[data-i18n]").forEach(function (el) {
+      el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
+      el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria")));
+    });
+    document.querySelectorAll("[data-i18n-ph]").forEach(function (el) {
+      el.setAttribute("placeholder", t(el.getAttribute("data-i18n-ph")));
+    });
+    resetBtn.textContent = resetArmed ? t("confirmClear") : t("clearDay");
+    langSel.value = settings.lang;
+    themeSel.value = settings.theme;
+  }
+
+  // Recurring commitments: stored once, applied to each new day.
+  function loadRec() {
+    try {
+      var raw = window.localStorage.getItem(REC_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) return arr;
+    } catch (e) { /* storage unavailable */ }
+    return [];
+  }
+
+  function saveRec() {
+    try {
+      window.localStorage.setItem(REC_KEY, JSON.stringify(rec));
+    } catch (e) {
+      statusEl.textContent = t("saveErrRec");
+    }
+  }
+
+  // Suggestions: one editable list on this device. Migrates the older tag list if present.
+  function loadSugs() {
+    try {
+      var raw = window.localStorage.getItem(SUG_KEY);
+      if (raw) { var arr = JSON.parse(raw); if (Array.isArray(arr)) return arr; }
+      var oldRaw = window.localStorage.getItem(OLD_TAG_KEY);
+      if (oldRaw) { var old = JSON.parse(oldRaw); if (Array.isArray(old)) return old.slice(); }
+    } catch (e) { /* storage unavailable */ }
+    return SUG_DEFAULTS.slice();
+  }
+
+  function saveSugs() {
+    try {
+      window.localStorage.setItem(SUG_KEY, JSON.stringify(sugs));
+    } catch (e) {
+      statusEl.textContent = t("saveErrSug");
+    }
+  }
+
+  var rec = loadRec();
+  var sugs = loadSugs();
+  var state = { slots: {}, start: DEFAULT_START, end: DEFAULT_END };
+
+  function makeSlot(txt) {
+    return { t: txt || "", d: false, tags: [], span: 1, from: null };
+  }
+
+  function normalize(s) {
+    s.start = (typeof s.start === "number") ? s.start : DEFAULT_START;
+    s.end = (typeof s.end === "number") ? s.end : DEFAULT_END;
+    Object.keys(s.slots).forEach(function (k) {
+      var x = s.slots[k];
+      x.t = x.t || "";
+      x.d = !!x.d;
+      x.tags = Array.isArray(x.tags) ? x.tags : [];
+      x.span = x.span || 1;
+      x.from = (x.from === undefined) ? null : x.from;
+    });
+    return s;
+  }
+
+  function inRange(h) { return h >= state.start && h <= state.end; }
+
+  function refreshTagList() {
+    tagList.innerHTML = "";
+    sugs.forEach(function (tg) {
+      var o = document.createElement("option");
+      o.value = tg;
+      tagList.appendChild(o);
+    });
+  }
+
+  // Re-render the tag area of every visible task row (after the list changes).
+  function refreshAllTagWraps() {
+    Object.keys(rowEls).forEach(function (k) {
+      var row = rowEls[k];
+      var wrap = row && row.querySelector(".tags");
+      if (wrap) renderTagsInto(wrap, parseInt(k, 10));
+    });
+  }
+
+  function renderSugList() {
+    sugList.innerHTML = "";
+    sugs.forEach(function (name) {
+      var chip = document.createElement("span");
+      chip.className = "sugchip";
+
+      var pick = document.createElement("button");
+      pick.type = "button";
+      pick.className = "sugpick";
+      pick.textContent = name;
+      pick.setAttribute("aria-label", t("sugAdd", { name: name }));
+      pick.addEventListener("click", function () { placeSuggestion(name); });
+
+      var x = document.createElement("button");
+      x.type = "button";
+      x.className = "sugx";
+      x.textContent = "×";
+      x.setAttribute("aria-label", t("sugRemove", { name: name }));
+      x.addEventListener("click", function () {
+        var idx = sugs.indexOf(name);
+        if (idx >= 0) sugs.splice(idx, 1);
+        saveSugs();
+        renderSugList();
+        refreshTagList();
+        refreshAllTagWraps();
+      });
+
+      chip.appendChild(pick);
+      chip.appendChild(x);
+      sugList.appendChild(chip);
+    });
+    if (!sugs.length) {
+      var empty = document.createElement("span");
+      empty.style.color = "var(--muted)";
+      empty.style.fontSize = "13px";
+      empty.textContent = t("noSug");
+      sugList.appendChild(empty);
+    }
+  }
+
+  sugForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var v = sugText.value.trim();
+    if (!v) return;
+    if (!hasTag(sugs, v)) {
+      sugs.push(v);
+      saveSugs();
+      renderSugList();
+      refreshTagList();
+      refreshAllTagWraps();
+    }
+    sugText.value = "";
+  });
+
+  // Read a day's record. Today with no record yet starts from the recurring list.
+  function loadDay(d) {
+    try {
+      var raw = window.localStorage.getItem(dayKey(d));
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (s && s.slots) return { state: normalize(s), created: false };
+      }
+    } catch (e) { /* storage unavailable */ }
+    var fresh = { slots: {}, start: DEFAULT_START, end: DEFAULT_END };
+    if (sameDay(d, TODAY)) {
+      rec.forEach(function (r) { fresh.slots[pad(r.h)] = makeSlot(r.t); });
+      return { state: fresh, created: true };
+    }
+    return { state: fresh, created: false };
+  }
+
+  function save() {
+    try {
+      window.localStorage.setItem(dayKey(viewDay), JSON.stringify(state));
+      statusEl.textContent = t("saved");
+    } catch (e) {
+      statusEl.textContent = t("saveErr");
+    }
+  }
+
+  function slot(h) {
+    var k = pad(h);
+    if (!state.slots[k]) state.slots[k] = makeSlot("");
+    return state.slots[k];
+  }
+
+  // A row is free if it has no text and is not covered by another block.
+  function isFreeFor(j, h) {
+    var sj = state.slots[pad(j)];
+    if (!sj) return true;
+    if (hasText(sj)) return false;
+    return sj.from === null || sj.from === h;
+  }
+
+  function maxSpan(h) {
+    var n = 1;
+    for (var j = h + 1; j <= state.end; j++) {
+      if (!isFreeFor(j, h)) break;
+      n++;
+    }
+    return n;
+  }
+
+  // Set how many hours a task occupies. Data only; the caller re-renders rows.
+  function applySpan(h, n) {
+    var s = slot(h);
+    for (var j = h + 1; j < h + s.span; j++) {
+      var c = state.slots[pad(j)];
+      if (c && c.from === h) c.from = null;
+    }
+    s.span = n;
+    for (var k = h + 1; k < h + n && k <= state.end; k++) {
+      var c2 = slot(k);
+      c2.from = h; c2.t = ""; c2.d = false; c2.tags = []; c2.span = 1;
+    }
+    save();
+  }
+
+  function updateCount() {
+    var filled = 0, done = 0;
+    Object.keys(state.slots).forEach(function (k) {
+      var h = parseInt(k, 10);
+      var s = state.slots[k];
+      if (!inRange(h) || s.from !== null) return;
+      if (hasText(s)) { filled++; if (s.d) done++; }
+    });
+    countEl.textContent = done + " / " + filled;
+  }
+
+  function updateNav() {
+    var isToday = sameDay(viewDay, TODAY);
+    var locale = settings.lang === "it" ? "it-IT" : "en-US";
+    var label = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(viewDay);
+    dateEl.textContent = label + (isToday ? t("todayTag") : "");
+    dateEl.classList.toggle("today", isToday);
+    nextBtn.disabled = isToday;
+    todayBtn.disabled = isToday;
+    startSel.value = String(state.start);
+    endSel.value = String(state.end);
+  }
+
+  function focusEl(id) {
+    var e = document.getElementById(id);
+    if (e) e.focus();
+  }
+
+  function renderTagsInto(wrap, h) {
+    wrap.innerHTML = "";
+    var s = slot(h);
+    s.tags.forEach(function (tg, i) {
+      var chip = document.createElement("span");
+      chip.className = "tag";
+      chip.appendChild(document.createTextNode(tg));
+      var x = document.createElement("button");
+      x.type = "button";
+      x.textContent = "×";
+      x.setAttribute("aria-label", t("removeTag", { name: tg }));
+      x.addEventListener("click", function () {
+        slot(h).tags.splice(i, 1);
+        save();
+        renderTagsInto(wrap, h);
+        focusEl("tag-" + pad(h));
+      });
+      chip.appendChild(x);
+      wrap.appendChild(chip);
+    });
+
+    // Suggestions not yet on this task: one tap adds them as tags.
+    sugs.forEach(function (tg) {
+      if (hasTag(slot(h).tags, tg)) return;
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "tagsug";
+      b.textContent = "+ " + tg;
+      b.setAttribute("aria-label", t("addTag", { name: tg }));
+      b.addEventListener("click", function () {
+        var cur = slot(h);
+        if (!hasTag(cur.tags, tg)) { cur.tags.push(tg); save(); }
+        renderTagsInto(wrap, h);
+        focusEl("tag-" + pad(h));
+      });
+      wrap.appendChild(b);
+    });
+
+    var inp = document.createElement("input");
+    inp.type = "text";
+    inp.id = "tag-" + pad(h);
+    inp.className = "tagin";
+    inp.placeholder = t("tagPh");
+    inp.maxLength = 20;
+    inp.setAttribute("list", "tagList");
+    inp.setAttribute("aria-label", t("addTagAria", { hour: pad(h) + ":00" }));
+    inp.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      var v = inp.value.trim();
+      if (!v) return;
+      var cur = slot(h);
+      if (!hasTag(cur.tags, v)) { cur.tags.push(v); save(); }
+      inp.value = "";
+      renderTagsInto(wrap, h);
+      focusEl("tag-" + pad(h));
+    });
+    wrap.appendChild(inp);
+  }
+
+  function renderRow(h) {
+    var s = slot(h);
+    var isToday = sameDay(viewDay, TODAY);
+    var nowH = new Date().getHours();
+    var el = document.createElement("div");
+    el.dataset.h = pad(h);
+
+    if (s.from !== null) {
+      // Continuation of a task that started earlier.
+      var start = state.slots[pad(s.from)];
+      el.className = "row cont" + (isToday && h === nowH ? " now" : "");
+
+      var hourC = document.createElement("span");
+      hourC.className = "hour";
+      hourC.textContent = pad(h) + ":00";
+
+      var txt = document.createElement("div");
+      txt.className = "cont-text";
+      txt.textContent = t("contText", { text: start ? start.t : "", hour: pad(s.from) + ":00" });
+
+      var chkC = document.createElement("input");
+      chkC.type = "checkbox";
+      chkC.className = "check";
+      chkC.checked = start ? start.d : false;
+      chkC.disabled = true;
+      chkC.setAttribute("aria-label", t("blockAt", { hour: pad(s.from) + ":00" }));
+
+      el.appendChild(hourC);
+      el.appendChild(txt);
+      el.appendChild(chkC);
+    } else {
+      el.className = "row" + (isToday && h === nowH ? " now" : "");
+      var filled = hasText(s);
+
+      var hour = document.createElement("span");
+      hour.className = "hour";
+      hour.textContent = pad(h) + ":00";
+
+      var input = document.createElement("input");
+      input.type = "text";
+      input.id = "task-" + pad(h);
+      input.className = "task" + (s.d ? " done" : "");
+      input.placeholder = t("taskPh");
+      input.value = s.t;
+      input.setAttribute("aria-label", t("taskAria", { hour: pad(h) + ":00" }));
+
+      var spanSel = document.createElement("select");
+      spanSel.id = "span-" + pad(h);
+      spanSel.className = "spansel";
+      spanSel.setAttribute("aria-label", t("durAria", { hour: pad(h) + ":00" }));
+      var max = maxSpan(h);
+      for (var n = 1; n <= max; n++) {
+        var o = document.createElement("option");
+        o.value = n;
+        o.textContent = n === 1 ? t("oneHour") : t("nHours", { n: n });
+        spanSel.appendChild(o);
+      }
+      spanSel.value = String(s.span);
+      spanSel.disabled = !filled;
+
+      var check = document.createElement("input");
+      check.type = "checkbox";
+      check.className = "check";
+      check.checked = s.d;
+      check.setAttribute("aria-label", t("doneAt", { hour: pad(h) + ":00" }));
+
+      var tagsWrap = document.createElement("div");
+      tagsWrap.className = "tags";
+      tagsWrap.setAttribute("data-tags", pad(h));
+      tagsWrap.hidden = !filled;
+
+      input.addEventListener("input", function () {
+        var cur = slot(h);
+        cur.t = input.value;
+        if (!hasText(cur)) {
+          cur.d = false;
+          cur.tags = [];
+          check.checked = false;
+          input.classList.remove("done");
+          var old = cur.span;
+          if (old > 1) {
+            applySpan(h, 1);
+            renderRange(h + 1, h + old - 1);
+          }
+          spanSel.disabled = true;
+          spanSel.value = "1";
+          tagsWrap.hidden = true;
+          renderTagsInto(tagsWrap, h);
+        } else {
+          spanSel.disabled = false;
+          tagsWrap.hidden = false;
+          if (cur.span > 1) renderRange(h + 1, h + cur.span - 1);
+        }
+        save(); updateCount();
+      });
+
+      spanSel.addEventListener("change", function () {
+        var n2 = parseInt(spanSel.value, 10);
+        var old2 = slot(h).span;
+        applySpan(h, n2);
+        renderRange(h, h + Math.max(old2, n2) - 1);
+        updateCount();
+        focusEl("span-" + pad(h));
+      });
+
+      check.addEventListener("change", function () {
+        var cur = slot(h);
+        cur.d = check.checked;
+        input.classList.toggle("done", cur.d);
+        save(); updateCount();
+        if (cur.span > 1) renderRange(h + 1, h + cur.span - 1);
+      });
+
+      el.appendChild(hour);
+      el.appendChild(input);
+      el.appendChild(spanSel);
+      el.appendChild(check);
+      el.appendChild(tagsWrap);
+      renderTagsInto(tagsWrap, h);
+    }
+
+    var prevRow = rowEls[h];
+    if (prevRow && prevRow.parentNode === rowsEl) rowsEl.replaceChild(el, prevRow);
+    else rowsEl.appendChild(el);
+    rowEls[h] = el;
+  }
+
+  function renderRange(a, b) {
+    for (var j = Math.max(a, state.start); j <= b && j <= state.end; j++) renderRow(j);
+  }
+
+  function renderAll() {
+    rowsEl.innerHTML = "";
+    rowEls = {};
+    renderRange(state.start, state.end);
+    refreshTagList();
+    updateCount();
+    updateNav();
+  }
+
+  function setDay(d) {
+    if (d > TODAY) return;
+    viewDay = d;
+    var r = loadDay(d);
+    state = r.state;
+    if (r.created) {
+      save();
+      if (rec.length) statusEl.textContent = t("newDay");
+    } else {
+      statusEl.textContent = t("saved");
+    }
+    renderAll();
+  }
+
+  // Change the day's first or last hour. Tasks outside the range are kept, just hidden.
+  function applyRange() {
+    // A task must not run past the end of the day.
+    Object.keys(state.slots).forEach(function (k) {
+      var s = state.slots[k];
+      var h = parseInt(k, 10);
+      if (s.from === null && s.span > 1 && h + s.span - 1 > state.end) {
+        applySpan(h, Math.max(1, state.end - h + 1));
+      }
+    });
+    save();
+    renderAll();
+  }
+
+  startSel.addEventListener("change", function () {
+    var v = parseInt(startSel.value, 10);
+    state.start = v;
+    if (state.end < v) state.end = v;
+    applyRange();
+  });
+
+  endSel.addEventListener("change", function () {
+    var v = parseInt(endSel.value, 10);
+    state.end = v;
+    if (state.start > v) state.start = v;
+    applyRange();
+  });
+
+  function fillRangeSelects() {
+    for (var h = 0; h <= 23; h++) {
+      var a = document.createElement("option");
+      a.value = h;
+      a.textContent = pad(h) + ":00";
+      startSel.appendChild(a);
+      var b = document.createElement("option");
+      b.value = h;
+      b.textContent = pad(h) + ":00";
+      endSel.appendChild(b);
+    }
+  }
+
+  prevBtn.addEventListener("click", function () { setDay(addDays(viewDay, -1)); });
+  nextBtn.addEventListener("click", function () { setDay(addDays(viewDay, 1)); });
+  todayBtn.addEventListener("click", function () { setDay(TODAY); });
+
+  function renderRec() {
+    recList.innerHTML = "";
+    rec.slice().sort(function (a, b) { return a.h - b.h; }).forEach(function (r) {
+      var li = document.createElement("li");
+      var label = document.createElement("span");
+      label.className = "name";
+      var when = document.createElement("span");
+      when.className = "when";
+      when.textContent = pad(r.h) + ":00";
+      label.appendChild(when);
+      label.appendChild(document.createTextNode(r.t));
+
+      var rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "rm";
+      rm.textContent = t("remove");
+      rm.setAttribute("aria-label", t("removeRec", { name: r.t, hour: pad(r.h) + ":00" }));
+      rm.addEventListener("click", function () {
+        var idx = rec.indexOf(r);
+        if (idx >= 0) rec.splice(idx, 1);
+        saveRec(); renderRec();
+      });
+
+      li.appendChild(label);
+      li.appendChild(rm);
+      recList.appendChild(li);
+    });
+    if (!rec.length) {
+      var empty = document.createElement("li");
+      empty.className = "name";
+      empty.style.color = "var(--muted)";
+      empty.textContent = t("noRec");
+      recList.appendChild(empty);
+    }
+  }
+
+  function fillRecHours() {
+    for (var h = 0; h <= 23; h++) {
+      var o = document.createElement("option");
+      o.value = h;
+      o.textContent = pad(h) + ":00";
+      recHour.appendChild(o);
+    }
+  }
+
+  recForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var txt = recText.value.trim();
+    if (!txt) return;
+    var h = parseInt(recHour.value, 10);
+    rec.push({ h: h, t: txt });
+    saveRec(); renderRec();
+    // Fill the slot on today only if it is visible and free.
+    if (sameDay(viewDay, TODAY) && inRange(h) && isFreeFor(h, h)) {
+      slot(h).t = txt;
+      save();
+      renderRow(h);
+      updateCount();
+    }
+    recText.value = "";
+  });
+
+  function placeSuggestion(name) {
+    var target = null;
+    for (var h = state.start; h <= state.end; h++) {
+      if (isFreeFor(h, -1)) { target = h; break; }
+    }
+    if (target === null) {
+      statusEl.textContent = t("allFull", { name: name });
+      return;
+    }
+    slot(target).t = name;
+    save();
+    renderRow(target);
+    updateCount();
+    focusEl("task-" + pad(target));
+  }
+
+  resetBtn.addEventListener("click", function () {
+    if (!resetArmed) {
+      resetArmed = true;
+      resetBtn.textContent = t("confirmClear");
+      resetBtn.classList.add("warn");
+      resetTimer = setTimeout(disarm, 4000);
+      return;
+    }
+    clearTimeout(resetTimer);
+    state = { slots: {}, start: state.start, end: state.end };
+    save();
+    renderAll();
+    disarm();
+  });
+
+  function disarm() {
+    resetArmed = false;
+    resetBtn.textContent = t("clearDay");
+    resetBtn.classList.remove("warn");
+  }
+
+  function refreshAll() {
+    applyStaticStrings();
+    renderRec();
+    renderSugList();
+    renderAll();
+  }
+
+  gearBtn.addEventListener("click", function () {
+    settingsPanel.hidden = !settingsPanel.hidden;
+    gearBtn.setAttribute("aria-expanded", String(!settingsPanel.hidden));
+  });
+
+  langSel.addEventListener("change", function () {
+    settings.lang = langSel.value === "it" ? "it" : "en";
+    saveSettings();
+    refreshAll();
+  });
+
+  themeSel.addEventListener("change", function () {
+    var v = themeSel.value;
+    settings.theme = (v === "light" || v === "dark") ? v : "system";
+    saveSettings();
+    applyTheme();
+  });
+
+  applyTheme();
+  fillRangeSelects();
+  fillRecHours();
+  applyStaticStrings();
+  renderRec();
+  renderSugList();
+  setDay(TODAY);
+})();
+</script>
+</body></html>

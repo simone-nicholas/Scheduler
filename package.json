@@ -1,0 +1,24 @@
+{
+  "name": "piano-giornata",
+  "productName": "Scheduler",
+  "version": "1.0.0",
+  "description": "Piano orario giornaliero",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.piano.giornata",
+    "files": ["main.js", "index.html", "package.json"],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dmg",
+      "identity": null
+    }
+  }
+}
